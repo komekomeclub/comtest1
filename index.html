@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Compass Map [ver4]</title>
+    <title>Compass Map [ver5]</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
@@ -38,7 +38,7 @@
             box-shadow: 0 0 15px orange;
         }
 
-        /* 方角の数値をデバッグ表示（確認用） */
+        /* デバッグ情報 */
         #debug-info {
             position: fixed; bottom: 20px; left: 20px;
             background: rgba(0,0,0,0.7); color: white;
@@ -50,7 +50,7 @@
 <body>
 
     <div id="map"></div>
-    <div id="version-label">[ver4]</div>
+    <div id="version-label">[ver5]</div>
     <div id="debug-info">Angle: ---</div>
     <button id="compass-btn">🧭</button>
 
@@ -58,10 +58,7 @@
 
     <script>
         // --- 設定 ---
-        // 日本の偏角補正（西偏約7度）。
-        // 磁北(Magnetic North)は真北(True North)より西にずれているため、
-        // 地図上の北(0)に合わせるにはマイナス補正を行います。
-        const DECLINATION_CORRECTION = -7; 
+        const DECLINATION_CORRECTION = -7; // 磁北偏差補正
 
         // --- 1. 地図初期化 ---
         const map = L.map('map').setView([35.681236, 139.767125], 15);
@@ -74,7 +71,7 @@
         let currentMarker = null;
         let directionLine = null;
         let isCompassActive = false;
-        let lastHeading = 0;
+        let lastHeading = 0; // 最新の方角を保存
 
         // --- 2. GPS処理 ---
         function onLocationFound(e) {
@@ -89,12 +86,20 @@
             } else {
                 currentMarker.setLatLng([currentLat, currentLng]);
             }
+            // 位置が変わったら線も再描画
             if (isCompassActive) drawCompassLine(lastHeading);
         }
 
         if (navigator.geolocation) {
             navigator.geolocation.watchPosition(onLocationFound, null, { enableHighAccuracy: true });
         }
+
+        // --- 追加：地図を動かしたときも線を再計算して描画 ---
+        map.on('move', () => {
+            if (isCompassActive && currentLat) {
+                drawCompassLine(lastHeading);
+            }
+        });
 
         // --- 3. コンパスボタン ---
         const btn = document.getElementById('compass-btn');
@@ -113,14 +118,13 @@
 
             if (isCompassActive) {
                 btn.classList.add('active');
-                
-                // Android用：絶対値イベント(deviceorientationabsolute)が使えるか確認
                 if ('ondeviceorientationabsolute' in window) {
                     window.addEventListener('deviceorientationabsolute', handleOrientation);
                 } else {
-                    // iOSまたは古いAndroid
                     window.addEventListener('deviceorientation', handleOrientation);
                 }
+                // すぐに描画トライ
+                if (currentLat) drawCompassLine(lastHeading);
             } else {
                 btn.classList.remove('active');
                 if ('ondeviceorientationabsolute' in window) {
@@ -136,44 +140,42 @@
             }
         });
 
-        // --- 4. 方角計算処理（重要） ---
+        // --- 4. 方角計算処理 ---
         function handleOrientation(event) {
             let heading = 0;
 
             if (event.webkitCompassHeading) {
-                // iOS: これが一番正確（磁北）
                 heading = event.webkitCompassHeading;
             } else if (event.absolute === true || event.alpha !== null) {
-                // Android (absolute):
-                // alphaは反時計回り(0=北, 90=西, 180=南, 270=東)のことが多い
-                // 地図用(時計回り)に変換: 360 - alpha
                 heading = 360 - event.alpha;
             }
 
-            // 偏角補正を加える
             heading += DECLINATION_CORRECTION;
-
-            // 0-360の範囲に収める
             if (heading < 0) heading += 360;
             if (heading >= 360) heading -= 360;
 
             lastHeading = heading;
-            
-            // デバッグ表示（画面左下）
             debugInfo.innerText = `Angle: ${Math.round(heading)}°`;
             
             drawCompassLine(heading);
         }
 
+        // --- 5. 描画処理（改良版） ---
         function drawCompassLine(heading) {
             if (currentLat === null || currentLng === null) return;
             
-            const lengthKm = 3; // 線を少し短く(3km)
-            
-            // 北(0度)基準で時計回りの角度をラジアンに
-            const headingRad = heading * (Math.PI / 180);
+            // 【変更点】地図の画面サイズに合わせて線の長さを決める
+            // 地図の中心から、画面の北東の端までの距離（メートル）を計算
+            const centerLatLng = map.getCenter();
+            const cornerLatLng = map.getBounds().getNorthEast();
+            const distMeters = map.distance(centerLatLng, cornerLatLng);
 
-            // 緯度経度の移動量を計算
+            // 画面の端まで届くように、計算した距離の2倍の長さを確保する（km単位に変換）
+            // これでズームアウトしても常に画面外まで線が届く
+            const lengthKm = (distMeters * 2) / 1000;
+
+            // --- 座標計算 ---
+            const headingRad = heading * (Math.PI / 180);
             const dy = (lengthKm / 111) * Math.cos(headingRad);
             const dx = (lengthKm / (111 * Math.cos(currentLat * Math.PI / 180))) * Math.sin(headingRad);
 
