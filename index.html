@@ -3,98 +3,84 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Compass Map [ver3]</title>
+    <title>Compass Map [ver4]</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
         body { margin: 0; padding: 0; overflow: hidden; }
-        
-        #map {
-            width: 100vw;
-            height: 100vh;
-            z-index: 1;
-        }
+        #map { width: 100vw; height: 100vh; z-index: 1; }
 
-        /* バージョン確認用ラベル */
+        /* バージョン表示 */
         #version-label {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            font-size: 24px;
-            font-weight: bold;
-            color: red;
-            background-color: rgba(255, 255, 255, 0.9);
-            padding: 5px 10px;
-            border: 2px solid red;
-            z-index: 2000;
-            pointer-events: none;
+            position: fixed; top: 20px; left: 20px;
+            font-size: 24px; font-weight: bold; color: red;
+            background-color: rgba(255,255,255,0.9);
+            padding: 5px 10px; border: 2px solid red;
+            z-index: 2000; pointer-events: none;
         }
 
-        /* 左端のコンパスボタン */
+        /* コンパスボタン */
         #compass-btn {
-            position: fixed;
-            left: 20px;
-            top: 50%; /* 画面の真ん中 */
+            position: fixed; left: 20px; top: 50%;
             transform: translateY(-50%);
-            width: 60px;
-            height: 60px;
-            background-color: white;
-            border: 2px solid #ccc;
+            width: 60px; height: 60px;
+            background-color: white; border: 2px solid #ccc;
             border-radius: 50%;
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            z-index: 1000;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 30px;
-            outline: none;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            transition: all 0.3s;
+            z-index: 1000; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 30px; outline: none; user-select: none;
+            -webkit-tap-highlight-color: transparent; transition: all 0.3s;
+        }
+        #compass-btn.active {
+            background-color: orange; border-color: #d35400; color: white;
+            box-shadow: 0 0 15px orange;
         }
 
-        /* ボタンON（アクティブ）時のスタイル */
-        #compass-btn.active {
-            background-color: orange;
-            border-color: #d35400;
-            color: white;
-            box-shadow: 0 0 15px orange; /* 光ってる感を出す */
+        /* 方角の数値をデバッグ表示（確認用） */
+        #debug-info {
+            position: fixed; bottom: 20px; left: 20px;
+            background: rgba(0,0,0,0.7); color: white;
+            padding: 5px; font-size: 12px; z-index: 2000;
+            pointer-events: none;
         }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
-    
-    <div id="version-label">[ver3]</div>
-
+    <div id="version-label">[ver4]</div>
+    <div id="debug-info">Angle: ---</div>
     <button id="compass-btn">🧭</button>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        // --- 1. 地図の初期化 ---
-        const map = L.map('map').setView([35.681236, 139.767125], 15);
+        // --- 設定 ---
+        // 日本の偏角補正（西偏約7度）。
+        // 磁北(Magnetic North)は真北(True North)より西にずれているため、
+        // 地図上の北(0)に合わせるにはマイナス補正を行います。
+        const DECLINATION_CORRECTION = -7; 
 
+        // --- 1. 地図初期化 ---
+        const map = L.map('map').setView([35.681236, 139.767125], 15);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
-        // --- 変数 ---
         let currentLat = null;
         let currentLng = null;
         let currentMarker = null;
-        let directionLine = null; // オレンジ色の線
+        let directionLine = null;
         let isCompassActive = false;
-        
-        // --- 2. GPS (現在地) の処理 ---
+        let lastHeading = 0;
+
+        // --- 2. GPS処理 ---
         function onLocationFound(e) {
             currentLat = e.coords.latitude;
             currentLng = e.coords.longitude;
-
-            // マーカー更新
+            
             if (!currentMarker) {
                 currentMarker = L.circleMarker([currentLat, currentLng], {
                     color: 'blue', fillColor: '#30f', fillOpacity: 0.5, radius: 10
@@ -103,106 +89,103 @@
             } else {
                 currentMarker.setLatLng([currentLat, currentLng]);
             }
-
-            // コンパスがONなら、歩いて移動しても線を書き直す
-            if (isCompassActive) {
-                drawCompassLine(lastHeading);
-            }
+            if (isCompassActive) drawCompassLine(lastHeading);
         }
 
         if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(onLocationFound, (e) => {
-                console.warn("GPS Error: " + e.message);
-            }, { enableHighAccuracy: true });
+            navigator.geolocation.watchPosition(onLocationFound, null, { enableHighAccuracy: true });
         }
 
-        // --- 3. コンパスボタンの処理 ---
+        // --- 3. コンパスボタン ---
         const btn = document.getElementById('compass-btn');
-        let lastHeading = 0; // 最後の方角を保存
+        const debugInfo = document.getElementById('debug-info');
 
         btn.addEventListener('click', async () => {
-            // iOS 13+ 用の許可リクエスト
+            // iOS Permission
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const response = await DeviceOrientationEvent.requestPermission();
-                    if (response !== 'granted') {
-                        alert('コンパスの許可が得られませんでした');
-                        return;
-                    }
-                } catch (e) {
-                    console.error(e);
-                }
+                    if (response !== 'granted') { alert('許可されませんでした'); return; }
+                } catch (e) { console.error(e); }
             }
 
-            // ON/OFF 切り替え
             isCompassActive = !isCompassActive;
 
             if (isCompassActive) {
-                // ON: ボタンをオレンジに、センサー開始
                 btn.classList.add('active');
-                window.addEventListener('deviceorientation', handleOrientation);
+                
+                // Android用：絶対値イベント(deviceorientationabsolute)が使えるか確認
+                if ('ondeviceorientationabsolute' in window) {
+                    window.addEventListener('deviceorientationabsolute', handleOrientation);
+                } else {
+                    // iOSまたは古いAndroid
+                    window.addEventListener('deviceorientation', handleOrientation);
+                }
             } else {
-                // OFF: ボタンを白に、センサー停止、線を消す
                 btn.classList.remove('active');
-                window.removeEventListener('deviceorientation', handleOrientation);
+                if ('ondeviceorientationabsolute' in window) {
+                    window.removeEventListener('deviceorientationabsolute', handleOrientation);
+                } else {
+                    window.removeEventListener('deviceorientation', handleOrientation);
+                }
                 if (directionLine) {
                     map.removeLayer(directionLine);
                     directionLine = null;
                 }
+                debugInfo.innerText = "Angle: ---";
             }
         });
 
-        // --- 4. センサーと描画の処理 ---
+        // --- 4. 方角計算処理（重要） ---
         function handleOrientation(event) {
             let heading = 0;
 
-            // iOS (webkitCompassHeading) と Android (alpha) の違いを吸収
             if (event.webkitCompassHeading) {
-                // iOS: 0=北, 90=東
+                // iOS: これが一番正確（磁北）
                 heading = event.webkitCompassHeading;
-            } else if (event.alpha) {
-                // Android等: 機種によるが、一般的に 360 - alpha で北基準になることが多い
+            } else if (event.absolute === true || event.alpha !== null) {
+                // Android (absolute):
+                // alphaは反時計回り(0=北, 90=西, 180=南, 270=東)のことが多い
+                // 地図用(時計回り)に変換: 360 - alpha
                 heading = 360 - event.alpha;
             }
 
+            // 偏角補正を加える
+            heading += DECLINATION_CORRECTION;
+
+            // 0-360の範囲に収める
+            if (heading < 0) heading += 360;
+            if (heading >= 360) heading -= 360;
+
             lastHeading = heading;
+            
+            // デバッグ表示（画面左下）
+            debugInfo.innerText = `Angle: ${Math.round(heading)}°`;
+            
             drawCompassLine(heading);
         }
 
         function drawCompassLine(heading) {
             if (currentLat === null || currentLng === null) return;
-
-            // 線の長さ (km)
-            const lengthKm = 5; 
-
-            // 計算: 北(0度)を基準に座標を計算
-            // ラジアン変換
-            const rad = (heading - 90) * (Math.PI / 180); 
-            // ※地図計算上、北を基準に時計回りに計算するため調整
+            
+            const lengthKm = 3; // 線を少し短く(3km)
+            
+            // 北(0度)基準で時計回りの角度をラジアンに
             const headingRad = heading * (Math.PI / 180);
 
-            // 簡易的な距離計算 (緯度1度≒111km)
+            // 緯度経度の移動量を計算
             const dy = (lengthKm / 111) * Math.cos(headingRad);
             const dx = (lengthKm / (111 * Math.cos(currentLat * Math.PI / 180))) * Math.sin(headingRad);
 
-            const endLat = currentLat + dy;
-            const endLng = currentLng + dx;
-
             const latlngs = [
                 [currentLat, currentLng],
-                [endLat, endLng]
+                [currentLat + dy, currentLng + dx]
             ];
 
-            // すでに線があれば消す
-            if (directionLine) {
-                map.removeLayer(directionLine);
-            }
+            if (directionLine) map.removeLayer(directionLine);
 
-            // 新しい線を描く
             directionLine = L.polyline(latlngs, {
-                color: 'orange',
-                weight: 5,
-                opacity: 0.7
+                color: 'orange', weight: 5, opacity: 0.7
             }).addTo(map);
         }
     </script>
