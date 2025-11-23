@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>現在地マップ</title>
+    <title>現在地マップ [ver2]</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
@@ -13,51 +13,63 @@
             width: 100vw;
             height: 100vh;
         }
+        
+        /* --- 追加：バージョン確認用の文字スタイル --- */
+        #version-label {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            font-size: 40px;       /* 文字を大きく */
+            font-weight: bold;
+            color: red;            /* 赤色で目立たせる */
+            background-color: rgba(255, 255, 255, 0.8); /* 背景を白く透けさせる */
+            padding: 10px;
+            border: 3px solid red;
+            z-index: 9999;         /* 地図の一番手前に表示 */
+            pointer-events: none;  /* この文字をクリックしても地図を操作できるようにする */
+        }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
 
+    <div id="version-label">[ver2]</div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        // 1. まず地図を仮の場所（東京駅）で初期化して表示しておく
-        //    (GPS取得までの間、真っ白になるのを防ぐため)
+        // 1. 地図の初期化
         const map = L.map('map').setView([35.681236, 139.767125], 13);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
-        // 2. 現在地を取得する関数
+        // 2. 現在地取得関数
         function onLocationFound(e) {
             const lat = e.coords.latitude;
             const lng = e.coords.longitude;
 
-            // 地図の中心を現在地に移動（ズームレベル16）
             map.setView([lat, lng], 16);
 
-            // 現在地にマーカーを立てる
             L.marker([lat, lng]).addTo(map)
                 .bindPopup("ここが現在地です")
                 .openPopup();
         }
 
-        // 位置情報の取得に失敗した場合
         function onLocationError(e) {
-            alert("現在地を取得できませんでした。\nブラウザの設定や通信環境を確認してください。\n(" + e.message + ")");
+            alert("現在地エラー: " + e.message);
         }
 
-        // 3. ブラウザが位置情報に対応しているか確認して実行
+        // 3. 位置情報の取得開始
         if (navigator.geolocation) {
-            // 現在地を取得開始
             navigator.geolocation.getCurrentPosition(onLocationFound, onLocationError, {
-                enableHighAccuracy: true, // 高精度モード（GPSなどを使用）
-                timeout: 10000            // 10秒でタイムアウト
+                enableHighAccuracy: true,
+                timeout: 10000
             });
         } else {
-            alert("このブラウザは位置情報に対応していません。");
+            alert("GPS非対応です");
         }
     </script>
 </body>
