@@ -3,220 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Compass Map App</title>
+    <title>Simple Map</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; }
-        
-        /* 地図を全画面表示 */
+        /* ページの余白をなくして全画面表示にする */
+        body { margin: 0; padding: 0; }
         #map {
             width: 100vw;
             height: 100vh;
-            z-index: 1;
-        }
-
-        /* 左端の丸いボタン */
-        #compass-btn {
-            position: fixed;
-            left: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            width: 60px;
-            height: 60px;
-            background-color: white;
-            border: 2px solid #ccc;
-            border-radius: 50%;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            z-index: 1000; /* 地図より手前に */
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            outline: none;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        /* ボタンがONの時のスタイル */
-        #compass-btn.active {
-            background-color: orange;
-            border-color: #d35400;
-            color: white;
         }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
-    
-    <button id="compass-btn">🧭</button>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <script>
-        // --- 1. 地図の初期化 ---
-        const map = L.map('map').setView([35.6895, 139.6917], 15); // 初期位置（とりあえず東京）
+        // 1. 地図の中心座標（東京駅周辺）
+        const tokyoStation = [35.681236, 139.767125];
 
-        // OpenStreetMapの読み込み
+        // 2. 地図を初期化（ズームレベル16）
+        const map = L.map('map').setView(tokyoStation, 16);
+
+        // 3. OpenStreetMap（無料の地図データ）を読み込んで表示
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
 
-        // --- 変数定義 ---
-        let currentLat = null;
-        let currentLng = null;
-        let currentMarker = null;   // 現在地マーカー
-        let directionLine = null;   // オレンジ色の線
-        let isCompassActive = false; // 機能ON/OFFフラグ
-        const lineLengthKm = 5;     // 線の長さ（約5km）
-
-        // --- 2. 現在地の取得と表示 ---
-        // GPSの監視を開始
-        if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(
-                (position) => {
-                    currentLat = position.coords.latitude;
-                    currentLng = position.coords.longitude;
-                    const accuracy = position.coords.accuracy;
-
-                    // 初回または移動時にマーカーを更新
-                    if (!currentMarker) {
-                        // 現在地を青い丸で表示
-                        currentMarker = L.circleMarker([currentLat, currentLng], {
-                            color: 'blue',
-                            fillColor: '#30f',
-                            fillOpacity: 0.5,
-                            radius: 10
-                        }).addTo(map);
-                        map.setView([currentLat, currentLng], 17); // 現在地にズーム
-                    } else {
-                        currentMarker.setLatLng([currentLat, currentLng]);
-                    }
-
-                    // コンパスがONなら線も書き直す（歩いて移動した場合など）
-                    if (isCompassActive) {
-                        updateLine();
-                    }
-                },
-                (error) => {
-                    console.error("GPS Error:", error);
-                    alert("現在地を取得できませんでした。設定を確認してください。");
-                },
-                {
-                    enableHighAccuracy: true, // 高精度モード
-                    timeout: 10000,
-                    maximumAge: 0
-                }
-            );
-        } else {
-            alert("このブラウザは位置情報に対応していません。");
-        }
-
-        // --- 3. コンパスボタンの処理 ---
-        const btn = document.getElementById('compass-btn');
-        let deviceOrientationHandler = null; // イベントハンドラ保持用
-        let currentHeading = 0; // 最新の方角
-
-        btn.addEventListener('click', async () => {
-            // iOS 13+ のためのパーミッション要求
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                try {
-                    const response = await DeviceOrientationEvent.requestPermission();
-                    if (response !== 'granted') {
-                        alert('コンパスの使用が許可されませんでした。');
-                        return;
-                    }
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-
-            // ON/OFF 切り替え
-            isCompassActive = !isCompassActive;
-
-            if (isCompassActive) {
-                // ONになった時
-                btn.classList.add('active');
-                window.addEventListener('deviceorientation', handleOrientation);
-            } else {
-                // OFFになった時
-                btn.classList.remove('active');
-                window.removeEventListener('deviceorientation', handleOrientation);
-                removeLine(); // 線を消す
-            }
-        });
-
-        // --- 4. ジャイロセンサー（方角）の処理 ---
-        function handleOrientation(event) {
-            let heading = 0;
-
-            // iOS (webkitCompassHeading) と Android (alpha) の違いを吸収
-            if (event.webkitCompassHeading) {
-                // iOS
-                heading = event.webkitCompassHeading;
-            } else if (event.alpha) {
-                // Android (absoluteがサポートされている場合など)
-                // alphaは反時計回りなので補正が必要な場合がありますが、
-                // 一般的なブラウザ実装では 360 - alpha が北基準になることが多いです
-                heading = 360 - event.alpha; 
-            }
-
-            currentHeading = heading;
-            updateLine();
-        }
-
-        // --- 5. 線の描画処理 ---
-        function updateLine() {
-            if (!isCompassActive || currentLat === null || currentLng === null) return;
-
-            // 現在地から currentHeading の方向に線を計算
-            // 簡易計算: 緯度1度≒111km, 経度1度≒111km * cos(lat)
-            // ラジアン変換
-            // 地図上の角度（北=0, 時計回り）に合わせて計算
-            const rad = (currentHeading - 90) * (Math.PI / 180); 
-            // ※ 数学座標系では0度が東なので -90度して補正...といきたいところですが、
-            // 地図計算では 北(0) を基準に計算します。
-            
-            // 北を0度として時計回り
-            const headingRad = currentHeading * (Math.PI / 180);
-
-            // 線の終点を計算（簡易的な平面近似）
-            // km を 緯度経度差分に変換 (1度 約111km)
-            const distDeg = lineLengthKm / 111; 
-            
-            const dLat = distDeg * Math.cos(headingRad); 
-            const dLng = distDeg * Math.sin(headingRad) / Math.cos(currentLat * Math.PI / 180);
-
-            const endLat = currentLat + dLat;
-            const endLng = currentLng + dLng;
-
-            const latlngs = [
-                [currentLat, currentLng],
-                [endLat, endLng]
-            ];
-
-            // 既存の線があれば削除して書き直す
-            if (directionLine) {
-                map.removeLayer(directionLine);
-            }
-
-            // オレンジ色の線を描画
-            directionLine = L.polyline(latlngs, {
-                color: 'orange',
-                weight: 5,
-                opacity: 0.8
-            }).addTo(map);
-        }
-
-        function removeLine() {
-            if (directionLine) {
-                map.removeLayer(directionLine);
-                directionLine = null;
-            }
-        }
+        // 4. おまけ：東京駅の場所にピン（マーカー）を立てる
+        L.marker(tokyoStation).addTo(map)
+            .bindPopup('東京駅')
+            .openPopup();
     </script>
 </body>
 </html>
